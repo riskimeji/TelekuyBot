@@ -24,6 +24,7 @@ from telegram.ext import (
     ContextTypes,
     ConversationHandler,
     CallbackQueryHandler,
+    CommandHandler,
     MessageHandler,
     filters,
 )
@@ -33,6 +34,7 @@ from telegram.error import BadRequest
 logger = logging.getLogger(__name__)
 
 from data.user_store    import get_user, update_balance
+from handlers.start     import cancel_and_restart
 from data.deposit_store import create_deposit, confirm_deposit, fail_deposit, get_user_deposits
 from utils.config       import ADMIN_ID
 
@@ -538,6 +540,7 @@ def build_deposit_conversation() -> ConversationHandler:
             ],
         },
         fallbacks=[
+            CommandHandler("start",              cancel_and_restart),
             MessageHandler(filters.Regex(r"^/cancel$"), cancel_deposit),
             CallbackQueryHandler(cancel_deposit,  pattern=r"^dep_cancel$"),
             CallbackQueryHandler(_fallback_menu,  pattern=r"^menu_"),

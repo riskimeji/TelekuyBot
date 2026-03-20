@@ -14,12 +14,14 @@ from telegram.ext import (
     ContextTypes,
     ConversationHandler,
     CallbackQueryHandler,
+    CommandHandler,
     MessageHandler,
     filters,
 )
 from telegram.error import BadRequest
 
 from data.user_store  import get_user, update_balance, add_total_spent, increment_order_count
+from handlers.start   import cancel_and_restart
 from utils.config     import ADMIN_ID
 from data.order_store import create_order as store_order, update_order_status
 from services.laravel_api import prepare_order, create_order as laravel_create_order, download_tdata
@@ -549,8 +551,10 @@ def build_buy_conversation() -> ConversationHandler:
             ],
         },
         fallbacks=[
+            CommandHandler("start",                    cancel_and_restart),
             MessageHandler(filters.Regex(r"^/cancel$"), cancel_purchase),
             CallbackQueryHandler(cancel_purchase, pattern=r"^buy_cancel$"),
+            CallbackQueryHandler(_fallback_menu,         pattern=r"^menu_"),
         ],
         per_message=False,
         per_chat=True,

@@ -68,6 +68,19 @@ def build_admin_reply_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
+def build_user_reply_keyboard() -> ReplyKeyboardMarkup:
+    """Keyboard permanen di bawah chat untuk user biasa."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton("🛒 Purchase"),   KeyboardButton("💳 Deposit")],
+            [KeyboardButton("📋 Riwayat"),    KeyboardButton("🆘 Support")],
+            [KeyboardButton("🏠 Home")],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=False,
+        input_field_placeholder="Pilih menu...",
+    )
+
 def build_welcome_caption(user_id: int, full_name: str,
                           balance: float, spent: float, orders: int) -> str:
     name_link = f'<a href="tg://user?id={user_id}">{full_name}</a>'
@@ -127,6 +140,11 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             "⚙️ <b>Admin Panel aktif.</b>",
             parse_mode="HTML",
             reply_markup=build_admin_reply_keyboard(),
+        )
+    else:
+        await update.message.reply_text(
+            "Gunakan tombol di bawah untuk navigasi cepat 👇",
+            reply_markup=build_user_reply_keyboard(),
         )
 
 
@@ -195,6 +213,12 @@ async def membership_check_callback(update, context) -> None:
             parse_mode="HTML",
             reply_markup=build_admin_reply_keyboard(),
         )
+    else:
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="Gunakan tombol di bawah untuk navigasi cepat 👇",
+            reply_markup=build_user_reply_keyboard(),
+        )
 
 
 async def home_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -251,3 +275,19 @@ async def home_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 parse_mode="HTML",
                 reply_markup=build_home_keyboard(),
             )
+
+
+async def cancel_and_restart(update, context) -> int:
+    """
+    Dipanggil saat user ketik /start di tengah conversation aktif.
+    Bersihkan semua state lalu jalankan start_handler seperti biasa.
+    """
+    from telegram.ext import ConversationHandler
+
+    # Bersihkan semua state conversation yang mungkin aktif
+    context.user_data.clear()
+
+    # Jalankan start flow normal
+    await start_handler(update, context)
+
+    return ConversationHandler.END

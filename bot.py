@@ -15,6 +15,8 @@ from telegram.ext import (
 
 from utils.config  import BOT_TOKEN
 from utils.logger  import setup_logging
+from handlers.start         import start_handler, home_callback, membership_check_callback
+from handlers.user_keyboard import register_user_keyboard_handlers
 from handlers.start   import start_handler, home_callback, membership_check_callback
 from handlers.catalog import (
     show_categories,
@@ -37,6 +39,23 @@ from handlers.deposit       import (
 
 setup_logging(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+async def error_handler(update, context) -> None:
+    """Global error handler — kirim pesan ke user dan log exception."""
+    logger.error(f"[ERROR] {context.error}", exc_info=context.error)
+    if update and update.effective_chat:
+        try:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=(
+                    "⚠️ <b>Terjadi kesalahan.</b>\n\n"
+                    "Silakan coba lagi atau hubungi @TelekuySupport."
+                ),
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
 
 
 def main() -> None:
@@ -76,9 +95,14 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(show_support,       pattern=r"^menu_support$"))
     app.add_handler(CallbackQueryHandler(close_rules,  pattern=r"^rules_close$"))
 
+    # ── User reply keyboard buttons ──────────────────────────────────────────
+    register_user_keyboard_handlers(app)
+
     # ── Admin commands ────────────────────────────────────────────────────────
     for h in get_admin_handlers():
         app.add_handler(h)
+
+    app.add_error_handler(error_handler)
 
     logger.info("Bot berjalan. Tekan Ctrl+C untuk stop.")
     app.run_polling(drop_pending_updates=True)
