@@ -250,7 +250,7 @@ async def confirm_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     try:
         prep = await asyncio.get_event_loop().run_in_executor(
             None,
-            lambda: prepare_order(cat_id, sell_price, qty)
+            lambda: prepare_order(cat_id, sell_price, qty, tg_user.id)
         )
     except Exception as e:
         update_balance(tg_user.id, +total, track_spent=False)   # refund

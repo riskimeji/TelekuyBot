@@ -13,7 +13,8 @@ from telegram.ext import (
     CallbackQueryHandler,
 )
 
-from utils.config import BOT_TOKEN
+from utils.config  import BOT_TOKEN
+from utils.logger  import setup_logging
 from handlers.start   import start_handler, home_callback, membership_check_callback
 from handlers.catalog import (
     show_categories,
@@ -34,10 +35,7 @@ from handlers.deposit       import (
     show_history_deposit,
 )
 
-logging.basicConfig(
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    level=logging.INFO,
-)
+setup_logging(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

@@ -16,6 +16,7 @@ Flow Deposit:
 import random
 import os
 from datetime import datetime
+from utils.helpers import now_wib
 from pathlib import Path
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -153,6 +154,8 @@ async def pick_method(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     method = query.data.replace("dep_method_", "")
     context.user_data[_KEY_METHOD] = method
 
+    logger.info(f"[DEPOSIT] user={query.from_user.id} pilih metode={method}")
+
     sent: Message = await query.message.reply_text(
         text=(
             f"💳 <b>Deposit via {method}</b>\n"
@@ -204,6 +207,8 @@ async def receive_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data[_KEY_AMOUNT] = amount
     context.user_data[_KEY_UNIQUE] = unique
 
+    logger.info(f"[DEPOSIT] user={update.effective_user.id} metode={method} nominal={amount} unik={unique} total={amount+unique}")
+
     # Simpan ke deposit_store sebagai pending
     record = create_deposit(update.effective_user.id, method, amount, unique)
     context.user_data[_KEY_DEP_ID] = record["deposit_id"]
@@ -251,10 +256,11 @@ async def receive_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     dep_id     = context.user_data.get(_KEY_DEP_ID, "-")
     tg_user    = update.effective_user
     photo_id   = update.message.photo[-1].file_id
+    logger.info(f"[DEPOSIT] user={tg_user.id} dep_id={dep_id} bukti dikirim, menunggu approval admin")
 
     # ── Simpan bukti ke storage/deposit_proofs/ ───────────────────────────
     try:
-        date_str  = datetime.utcnow().strftime("%Y%m%d")
+        date_str  = now_wib().strftime("%Y%m%d")
         filename  = f"{date_str}_{dep_id}_{tg_user.id}.jpg"
         file_path = PROOF_DIR / filename
 
@@ -335,18 +341,25 @@ async def admin_approve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     amount  = int(parts[-1])
     dep_id  = "_".join(parts[4:-1])   # dep_id bisa mengandung underscore
 
+    # Guard double approve — cek dulu sebelum update saldo
+    confirmed = confirm_deposit(user_id, dep_id)
+    if confirmed is None:
+        # Sudah pernah di-approve sebelumnya
+        logger.warning(f"[DEPOSIT] DOUBLE APPROVE BLOCKED dep_id={dep_id} user={user_id}")
+        await query.answer("⚠️ Deposit ini sudah pernah di-approve!", show_alert=True)
+        return
+
     # Update saldo user
     try:
         new_balance = update_balance(user_id, amount, track_spent=False)
+        logger.info(f"[DEPOSIT] APPROVED dep_id={dep_id} user={user_id} +{amount:,} IDR saldo_baru={new_balance:,}")
     except Exception as e:
+        logger.error(f"[DEPOSIT] APPROVE FAILED dep_id={dep_id} user={user_id} error={e}")
         await query.edit_message_caption(
             caption=query.message.caption + f"\n\n❌ Gagal update saldo: {e}",
             parse_mode="HTML",
         )
         return
-
-    # Update deposit record
-    confirm_deposit(user_id, dep_id)
 
     # Edit pesan admin
     await query.edit_message_caption(
@@ -391,6 +404,7 @@ async def admin_reject(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     dep_id  = "_".join(parts[4:])
 
     fail_deposit(user_id, dep_id)
+    logger.info(f"[DEPOSIT] REJECTED dep_id={dep_id} user={user_id}")
 
     await query.edit_message_caption(
         caption=query.message.caption + "\n\n❌ <b>REJECTED</b>",
@@ -423,6 +437,7 @@ async def cancel_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     dep_id = context.user_data.get(_KEY_DEP_ID)
     if dep_id:
         fail_deposit(update.effective_user.id, dep_id)
+        logger.info(f"[DEPOSIT] CANCELLED dep_id={dep_id} user={update.effective_user.id}")
 
     query = update.callback_query if update.callback_query else None
     if query:

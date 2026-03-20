@@ -98,13 +98,17 @@ def confirm_deposit(user_id: int, deposit_id: str) -> dict | None:
     """
     Tandai deposit sebagai 'confirmed' dan catat waktu konfirmasi.
     Dipanggil oleh admin_approve di deposit.py.
-    Return: record yang diupdate, None kalau tidak ketemu.
+    Return: record yang diupdate.
+    Return None kalau tidak ketemu ATAU sudah pernah confirmed (guard double approve).
     """
     uid = str(user_id)
     with FileLock(LOCK_FILE, timeout=10):
         data = _read_all()
         for record in data.get(uid, []):
             if record["deposit_id"] == deposit_id:
+                # Guard double approve — kalau sudah confirmed, tolak
+                if record["status"] == "confirmed":
+                    return None
                 record["status"]       = "confirmed"
                 record["confirmed_at"] = now_wib_str()
                 _write_all(data)
