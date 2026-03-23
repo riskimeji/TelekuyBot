@@ -71,14 +71,32 @@ def _find_category(context, cat_id: int) -> dict | None:
 
 # ── keyboard builders ────────────────────────────────────────────────────────
 
-def _kb_categories(categories: list[dict]) -> InlineKeyboardMarkup:
+CAT_PAGE_SIZE = 10
+
+def _kb_categories(categories: list[dict], page: int = 0) -> InlineKeyboardMarkup:
+    """Tampilkan kategori dengan pagination 10 per halaman."""
+    total_pages = max(1, (len(categories) + CAT_PAGE_SIZE - 1) // CAT_PAGE_SIZE)
+    page        = max(0, min(page, total_pages - 1))
+    start       = page * CAT_PAGE_SIZE
+    chunk       = categories[start : start + CAT_PAGE_SIZE]
+
     rows = []
-    for cat in categories:
+    for cat in chunk:
         stock = cat.get("total_stock", 0)
         name  = cat.get("name", "?")
         label = f"{name}  ({stock})" if stock > 0 else f"{name}  (Habis)"
         cb    = f"cat_{cat['id']}" if stock > 0 else "cat_out_of_stock"
         rows.append([InlineKeyboardButton(label, callback_data=cb)])
+
+    # Navigasi
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("◀️ Prev", callback_data=f"cat_page_{page-1}"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton("Next ▶️", callback_data=f"cat_page_{page+1}"))
+    if nav:
+        rows.append(nav)
+
     rows.append([InlineKeyboardButton("🏠 Home", callback_data="menu_home")])
     return InlineKeyboardMarkup(rows)
 
@@ -150,7 +168,41 @@ async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         f"Pilih kategori akun yang ingin dibeli.\n"
         f"Total tersedia: <b>{total:,}</b> akun"
     )
-    await _edit(query, caption, _kb_categories(categories))
+    await _edit(query, caption, _kb_categories(categories, page=0))
+
+
+async def paginate_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Klik tombol Prev/Next di halaman kategori.
+    callback_data: cat_page_{n}
+    """
+    query: CallbackQuery = update.callback_query
+    await query.answer()
+
+    page       = int(query.data.split("_")[-1])
+    categories = _get_categories_cached(context)
+
+    if not categories:
+        # Cache kosong — ambil ulang
+        try:
+            from services.laravel_api import get_categories
+            categories = get_categories()
+            context.bot_data["categories"] = categories
+        except Exception as e:
+            await query.answer(f"❌ Gagal memuat: {e}", show_alert=True)
+            return
+
+    total      = sum(c.get("total_stock", 0) for c in categories)
+    total_pages = max(1, (len(categories) + CAT_PAGE_SIZE - 1) // CAT_PAGE_SIZE)
+    caption    = (
+        f"🛒 <b>Purchase</b>\n"
+        f"──────────────────────\n"
+        f"Pilih kategori akun yang ingin dibeli.\n"
+        f"Total tersedia: <b>{total:,}</b> akun  "
+        f"<i>(hal. {page+1}/{total_pages})</i>"
+    )
+
+    await _edit(query, caption, _kb_categories(categories, page=page))
 
 
 async def show_price_tiers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

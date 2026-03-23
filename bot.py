@@ -20,6 +20,7 @@ from handlers.user_keyboard import register_user_keyboard_handlers
 from handlers.start   import start_handler, home_callback, membership_check_callback
 from handlers.catalog import (
     show_categories,
+    paginate_categories,
     show_price_tiers,
     show_item_detail,
     show_instruction,
@@ -76,8 +77,9 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(show_categories, pattern=r"^menu_stock$"))
 
     # ── 4. Catalog flow ───────────────────────────────────────────────────────────
-    app.add_handler(CallbackQueryHandler(out_of_stock_alert, pattern=r"^cat_out_of_stock$"))
-    app.add_handler(CallbackQueryHandler(show_price_tiers,   pattern=r"^cat_\d+$"))
+    app.add_handler(CallbackQueryHandler(out_of_stock_alert,  pattern=r"^cat_out_of_stock$"))
+    app.add_handler(CallbackQueryHandler(paginate_categories, pattern=r"^cat_page_\d+$"))
+    app.add_handler(CallbackQueryHandler(show_price_tiers,    pattern=r"^cat_\d+$"))
     app.add_handler(CallbackQueryHandler(show_item_detail,   pattern=r"^tier_\d+_\d+$"))
     app.add_handler(CallbackQueryHandler(show_instruction,   pattern=r"^instr_(post_)?\d+$"))
     app.add_handler(CallbackQueryHandler(close_instruction,  pattern=r"^instr_close$"))
