@@ -10,7 +10,8 @@ Fitur admin:
 
 import logging
 import asyncio
-from datetime import datetime, timedelta
+from datetime import timedelta
+from utils.helpers import now_wib, fmt_date_wib
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CommandHandler, MessageHandler, ConversationHandler, filters
@@ -21,6 +22,7 @@ from data.refund_store  import save_refund, get_all_refunds, get_refunds_by_user
 from data.deposit_store import get_user_deposits
 from services.laravel_api import get_categories
 from utils.config import ADMIN_ID
+from handlers.deposit import admin_list_deposits
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +186,7 @@ async def total_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     active = total - banned
 
     # Bergabung hari ini
-    today      = datetime.utcnow().date().isoformat()
+    today      = now_wib().date().isoformat()
     new_today  = sum(
         1 for u in users.values()
         if u.get("joined_at", "")[:10] == today
@@ -207,13 +209,13 @@ async def total_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def top10_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/top10deposit — top 10 user berdasarkan total deposit confirmed 30 hari terakhir."""
     users    = get_all_users()
-    cutoff   = (datetime.utcnow() - timedelta(days=30)).isoformat()
+    cutoff   = (now_wib() - timedelta(days=30)).isoformat()
     ranking  = []
 
     for uid, udata in users.items():
         deposits = get_user_deposits(int(uid), limit=200)
         total_dep = sum(
-            d.get("amount_base", d.get("amount", 0))
+            d.get("amount_total", d.get("amount_total", 0))
             for d in deposits
             if d.get("status") == "confirmed"
             and d.get("confirmed_at", "") >= cutoff
@@ -329,6 +331,10 @@ async def btn_refund_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.args = []
     await refund_history(update, context)
 
+@admin_only
+async def btn_list_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Tombol '📂 List Deposit' dari reply keyboard."""
+    await admin_list_deposits(update, context)
 
 def get_admin_handlers():
     return [
@@ -338,6 +344,7 @@ def get_admin_handlers():
         CommandHandler("totalusers",      total_users),
         CommandHandler("top10deposit",    top10_deposit),
         CommandHandler("refundhistory",   refund_history),
+        CommandHandler("listdeposit",     admin_list_deposits),
         # Reply keyboard buttons (filter teks exact)
         MessageHandler(filters.Regex(r"^📊 Total Users$"),    btn_total_users),
         MessageHandler(filters.Regex(r"^🏆 Top 10 Deposit$"), btn_top10),
@@ -345,6 +352,7 @@ def get_admin_handlers():
         MessageHandler(filters.Regex(r"^📦 Broadcast Stok$"), btn_broadcast_stock),
         MessageHandler(filters.Regex(r"^💸 Refund Saldo$"),   start_refund),
         MessageHandler(filters.Regex(r"^📋 Refund History$"),  btn_refund_history),
+        MessageHandler(filters.Regex(r"^📂 List Deposit$"),    btn_list_deposit),
     ]
 
 

@@ -17,7 +17,6 @@ from utils.config  import BOT_TOKEN
 from utils.logger  import setup_logging
 from handlers.start         import start_handler, home_callback, membership_check_callback
 from handlers.user_keyboard import register_user_keyboard_handlers
-from handlers.start   import start_handler, home_callback, membership_check_callback
 from handlers.catalog import (
     show_categories,
     paginate_categories,
@@ -35,7 +34,7 @@ from handlers.admin         import get_admin_handlers, build_refund_conversation
 from handlers.deposit       import (
     show_deposit_menu, build_deposit_conversation,
     admin_approve, admin_reject,
-    show_history_deposit,
+    show_history_deposit, admin_list_deposits, resume_upload,
 )
 
 setup_logging(level=logging.INFO)
@@ -93,8 +92,10 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(show_deposit_menu,  pattern=r"^menu_deposit$"))
     app.add_handler(CallbackQueryHandler(show_history_deposit, pattern=r"^menu_history_deposit$"))
     app.add_handler(CallbackQueryHandler(admin_approve,      pattern=r"^adm_dep_approve_"))
-    app.add_handler(CallbackQueryHandler(admin_reject,       pattern=r"^adm_dep_reject_"))
-    app.add_handler(CallbackQueryHandler(show_support,       pattern=r"^menu_support$"))
+    app.add_handler(CallbackQueryHandler(admin_reject,        pattern=r"^adm_dep_reject_"))
+    app.add_handler(CallbackQueryHandler(admin_list_deposits, pattern=r"^adm_dep_list_"))
+    app.add_handler(CallbackQueryHandler(resume_upload,       pattern=r"^dep_resume_"))
+    app.add_handler(CallbackQueryHandler(show_support,        pattern=r"^menu_support$"))
     app.add_handler(CallbackQueryHandler(close_rules,  pattern=r"^rules_close$"))
 
     # ── User reply keyboard buttons ──────────────────────────────────────────

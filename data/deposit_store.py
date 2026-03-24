@@ -141,6 +141,22 @@ def get_user_deposits(user_id: int, limit: int = 10) -> list:
     return list(reversed(records))[:limit]
 
 
+def get_all_deposits(status_filter: str = None, limit: int = 100) -> list[dict]:
+    """
+    Ambil semua deposit dari semua user.
+    status_filter: 'pending' | 'confirmed' | 'failed' | None (semua)
+    Return: [{"user_id": int, "record": dict}, ...] terbaru di atas.
+    """
+    data   = _read_all()
+    result = []
+    for uid, records in data.items():
+        for r in records:
+            if status_filter is None or r.get("status") == status_filter:
+                result.append({"user_id": int(uid), "record": r})
+    result.sort(key=lambda x: x["record"]["created_at"], reverse=True)
+    return result[:limit]
+
+
 def get_pending_deposits() -> list[dict]:
     """
     Ambil semua deposit berstatus 'pending' dari semua user.

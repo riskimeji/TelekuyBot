@@ -10,6 +10,8 @@ from datetime import datetime
 from utils.helpers import now_wib_str
 from filelock import FileLock
 from utils.config import STORAGE_DIR
+import logging
+logger = logging.getLogger(__name__)
 
 USERS_FILE = os.path.join(STORAGE_DIR, "users.json")
 LOCK_FILE = USERS_FILE + ".lock"
@@ -95,6 +97,9 @@ def update_balance(user_id: int, delta: float, track_spent: bool = False) -> flo
         new_balance = round(users[uid]["balance_idr"] + delta, 6)
         if new_balance < 0:
             raise ValueError("Saldo tidak mencukupi.")
+        
+        # balance now before update
+        logger.info(f"Updating balance for user {user_id}: {users[uid]['balance_idr']} -> {new_balance} (delta: {delta})")
 
         users[uid]["balance_idr"] = new_balance
         if track_spent and delta < 0:

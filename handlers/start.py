@@ -60,7 +60,8 @@ def build_admin_reply_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton("📊 Total Users"),  KeyboardButton("🏆 Top 10 Deposit")],
             [KeyboardButton("📢 Broadcast"),    KeyboardButton("📦 Broadcast Stok")],
-        [KeyboardButton("💸 Refund Saldo"), KeyboardButton("📋 Refund History")],
+            [KeyboardButton("💸 Refund Saldo"), KeyboardButton("📋 Refund History")],
+            [KeyboardButton("📂 List Deposit")],
         ],
         resize_keyboard=True,      # ukuran tombol lebih kecil, tidak memenuhi layar
         one_time_keyboard=False,   # keyboard tetap muncul, tidak hilang setelah diklik
