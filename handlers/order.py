@@ -373,10 +373,18 @@ async def confirm_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             f"🔖 Order Code : <code>{order_code}</code>\n"
             f"{partial_msg}"
             f"──────────────────────\n"
-            f"🌐 Lihat order: https://order.telekuy.com/\n"
+            f"🌐 Akses order: https://order.telekuy.com/\n\n"
+            f"<b>Cara login akun via kode OTP:</b>\n"
+            f"1. Masukkan kode order di web\n"
+            f"2. Klik nomor → salin → login Telegram\n"
+            f"3. Klik <b>Get OTP</b> di web → masukkan ke Telegram\n\n"
+            f"⚠️ DILARANG reset password/email!\n"
+            f"⚠️ Mengganti di perbolehkan setelah login\n"
+            f"🎬 Tutorial lengkap: https://t.me/TelekuyMarket/87\n\n"
             f"⏳ File tdata sedang disiapkan, akan dikirim otomatis...\n"
             f"❓ Butuh bantuan? @TelekuySupport"
         ),
+
         parse_mode="HTML",
         disable_web_page_preview=True,
         reply_markup=InlineKeyboardMarkup([

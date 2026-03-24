@@ -311,7 +311,7 @@ INSTRUCTION_TEXT = (
     "2. Untuk <b>tdata</b>: ekstrak ke folder Telegram, lalu buka aplikasinya.\n"
     "3. Untuk <b>session</b>: gunakan Telethon / Pyrogram sesuai kebutuhanmu.\n"
     "4. Jangan login di lebih dari 1 device sekaligus untuk menghindari ban.\n\n"
-    "🌐 Akses order kamu di: https://order.telekuy.com/\n"
+    "🌐 Akses Order dan Login melalui: https://order.telekuy.com/\n"
     "🎬 Tutorial lengkap: https://t.me/TelekuyMarket/87\n\n"
     "❓ Ada pertanyaan? Hubungi @TelekuySupport"
 )
