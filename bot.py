@@ -35,6 +35,7 @@ from handlers.deposit       import (
     show_deposit_menu, build_deposit_conversation,
     admin_approve, admin_reject,
     show_history_deposit, admin_list_deposits, resume_upload,
+    close_history_deposit,
 )
 
 setup_logging(level=logging.INFO)
@@ -94,7 +95,8 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(admin_approve,      pattern=r"^adm_dep_approve_"))
     app.add_handler(CallbackQueryHandler(admin_reject,        pattern=r"^adm_dep_reject_"))
     app.add_handler(CallbackQueryHandler(admin_list_deposits, pattern=r"^adm_dep_list_"))
-    app.add_handler(CallbackQueryHandler(resume_upload,       pattern=r"^dep_resume_"))
+    app.add_handler(CallbackQueryHandler(resume_upload,          pattern=r"^dep_resume_"))
+    app.add_handler(CallbackQueryHandler(close_history_deposit,  pattern=r"^dep_hist_close$"))
     app.add_handler(CallbackQueryHandler(show_support,        pattern=r"^menu_support$"))
     app.add_handler(CallbackQueryHandler(close_rules,  pattern=r"^rules_close$"))
 

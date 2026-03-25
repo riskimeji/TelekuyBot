@@ -437,10 +437,8 @@ async def confirm_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def _fallback_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
-    Dipanggil saat user klik menu apapun (menu_home, menu_rules, dll)
-    saat conversation buy sedang aktif.
-    Hapus pesan prompt jika ada, bersihkan state, lalu re-dispatch
-    supaya handler asli (show_rules, home_callback, dll) tetap jalan.
+    Dipanggil saat user klik menu apapun saat conversation buy aktif.
+    Bersihkan state, hapus pesan prompt, dispatch manual (tanpa process_update).
     """
     _clear_buy_data(context)
 
@@ -455,8 +453,43 @@ async def _fallback_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         except Exception:
             pass
 
-    # Re-dispatch update ini ke handler lain yang terdaftar di application
-    await context.application.process_update(update)
+    query = update.callback_query
+    if not query:
+        return ConversationHandler.END
+
+    cb = query.data
+    try:
+        if cb == "menu_home":
+            from handlers.start import home_callback
+            await home_callback(update, context)
+        elif cb == "menu_stock":
+            from handlers.catalog import show_categories
+            await show_categories(update, context)
+        elif cb == "menu_deposit":
+            from handlers.deposit import show_deposit_menu
+            await show_deposit_menu(update, context)
+        elif cb == "menu_history_order":
+            from handlers.history_order import show_history_order
+            await show_history_order(update, context)
+        elif cb == "menu_history_deposit":
+            from handlers.deposit import show_history_deposit
+            await show_history_deposit(update, context)
+        elif cb == "menu_support":
+            from handlers.support import show_support
+            await show_support(update, context)
+        elif cb == "menu_rules":
+            from handlers.rules import show_rules
+            await show_rules(update, context)
+        else:
+            await query.answer()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"[FALLBACK_MENU] error: {e}")
+        try:
+            await query.answer("Silakan coba lagi.", show_alert=True)
+        except Exception:
+            pass
+
     return ConversationHandler.END
 
 
@@ -561,7 +594,7 @@ def build_buy_conversation() -> ConversationHandler:
         fallbacks=[
             CommandHandler("start",                    cancel_and_restart),
             MessageHandler(filters.Regex(r"^/cancel$"), cancel_purchase),
-            CallbackQueryHandler(cancel_purchase, pattern=r"^buy_cancel$"),
+            CallbackQueryHandler(cancel_purchase,        pattern=r"^buy_cancel$"),
             CallbackQueryHandler(_fallback_menu,         pattern=r"^menu_"),
         ],
         per_message=False,

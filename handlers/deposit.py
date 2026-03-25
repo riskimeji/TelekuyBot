@@ -240,11 +240,16 @@ async def receive_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     tg_user  = update.effective_user
     photo_id = update.message.photo[-1].file_id
 
-    logger.info(f"[DEPOSIT] user={tg_user.id} dep_id={dep_id} bukti dikirim, menunggu approval admin")
+    # Cegah duplikat notif — cek apakah dep_id ini sudah pernah dinotif
+    # dengan cara cek apakah ada file bukti yang sudah tersimpan sebelumnya
+    existing_proof = list(PROOF_DIR.glob(f"*_{dep_id}_{tg_user.id}.jpg"))
+    is_reupload    = len(existing_proof) > 0
+
+    logger.info(f"[DEPOSIT] user={tg_user.id} dep_id={dep_id} bukti dikirim {'(re-upload)' if is_reupload else ''}, menunggu approval admin")
 
     # Simpan bukti ke storage
     try:
-        date_str  = datetime.now().strftime("%Y%m%d")
+        date_str  = now_wib().strftime("%Y%m%d_%H%M%S")
         filename  = f"{date_str}_{dep_id}_{tg_user.id}.jpg"
         file_path = PROOF_DIR / filename
         tg_file   = await update.message.photo[-1].get_file()
@@ -291,16 +296,35 @@ async def receive_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         ]
     ])
 
-    try:
-        await context.bot.send_photo(
-            chat_id=ADMIN_ID,
-            photo=photo_id,
-            caption=admin_text,
-            parse_mode="HTML",
-            reply_markup=admin_kb,
-        )
-    except Exception as e:
-        logger.error(f"Gagal notif admin: {e}")
+    if not is_reupload:
+        # Kirim notif ke admin hanya untuk upload pertama
+        try:
+            await context.bot.send_photo(
+                chat_id=ADMIN_ID,
+                photo=photo_id,
+                caption=admin_text,
+                parse_mode="HTML",
+                reply_markup=admin_kb,
+            )
+        except Exception as e:
+            logger.error(f"Gagal notif admin: {e}")
+    else:
+        # Re-upload — kirim update ke admin tanpa buat notif baru
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    f"🔄 <b>Bukti Diperbarui</b>\n"
+                    f"──────────────────────\n"
+                    f"👤 User : <code>{tg_user.id}</code>\n"
+                    f"🔖 ID   : <code>{dep_id}</code>\n"
+                    f"User mengirim ulang bukti transfer."
+                ),
+                parse_mode="HTML",
+            )
+            await context.bot.send_photo(chat_id=ADMIN_ID, photo=photo_id)
+        except Exception as e:
+            logger.error(f"Gagal notif admin re-upload: {e}")
 
     _clear_dep_data(context)
     return ConversationHandler.END
@@ -426,12 +450,12 @@ async def show_history_deposit(update: Update, context: ContextTypes.DEFAULT_TYP
 
     deposits = get_user_deposits(update.effective_user.id, limit=20)
 
+    kb_rows = []   # inisialisasi di luar blok supaya selalu tersedia
     if not deposits:
         text = "📥 <b>Riwayat Deposit</b>\n──────────────────────\nBelum ada riwayat deposit."
     else:
         STATUS_ICON = {"confirmed": "✅", "pending": "⏳", "failed": "❌"}
         lines   = ["📥 <b>Riwayat Deposit</b>\n──────────────────────"]
-        kb_rows = []
         for d in deposits:
             icon    = STATUS_ICON.get(d.get("status", ""), "❓")
             method  = d.get("method", "-")
@@ -464,12 +488,37 @@ async def show_history_deposit(update: Update, context: ContextTypes.DEFAULT_TYP
     msg = query.message
     kb_rows_final = kb_rows + [[InlineKeyboardButton("🏠 Home", callback_data="menu_home")]]
     kb  = InlineKeyboardMarkup(kb_rows_final)
+    # Keyboard: kalau perlu kirim pesan baru, pakai tombol Tutup (hapus pesan)
+    # bukan Home (supaya tidak double home)
+    def _make_kb(as_new_msg: bool) -> InlineKeyboardMarkup:
+        close_btn = [InlineKeyboardButton("❌ Tutup", callback_data="dep_hist_close")]
+        home_btn  = [InlineKeyboardButton("🏠 Home", callback_data="menu_home")]
+        rows = kb_rows + [close_btn if as_new_msg else home_btn]
+        return InlineKeyboardMarkup(rows)
+
     try:
         if msg.photo or msg.document:
-            await query.edit_message_caption(caption=text, parse_mode="HTML", reply_markup=kb)
+            if len(text) > 1024:
+                await query.answer()
+                await msg.reply_text(text=text, parse_mode="HTML", reply_markup=_make_kb(True))
+            else:
+                await query.edit_message_caption(caption=text, parse_mode="HTML", reply_markup=_make_kb(False))
         else:
-            await query.edit_message_text(text=text, parse_mode="HTML", reply_markup=kb)
+            await query.edit_message_text(text=text, parse_mode="HTML", reply_markup=_make_kb(False))
     except BadRequest:
+        try:
+            await query.answer()
+            await msg.reply_text(text=text, parse_mode="HTML", reply_markup=_make_kb(True))
+        except Exception:
+            pass
+
+async def close_history_deposit(update, context) -> None:
+    """Hapus pesan riwayat deposit yang dikirim sebagai pesan baru."""
+    query = update.callback_query
+    await query.answer()
+    try:
+        await query.delete_message()
+    except Exception:
         pass
 
 
@@ -695,8 +744,52 @@ def _clear_dep_data(context) -> None:
 
 
 async def _fallback_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Menu diklik saat conversation aktif.
+    Bersihkan state, lalu dispatch manual ke handler yang sesuai
+    TANPA process_update (menghindari infinite recursion).
+    """
     _clear_dep_data(context)
-    await context.application.process_update(update)
+
+    query = update.callback_query
+    if not query:
+        return ConversationHandler.END
+
+    cb = query.data
+
+    # Dispatch manual berdasarkan callback_data
+    from handlers.start import home_callback, build_home_keyboard, build_welcome_caption, _resize_logo
+    from data.user_store import upsert_user
+
+    try:
+        if cb == "menu_home":
+            await home_callback(update, context)
+        elif cb == "menu_stock":
+            from handlers.catalog import show_categories
+            await show_categories(update, context)
+        elif cb == "menu_deposit":
+            await show_deposit_menu(update, context)
+        elif cb == "menu_history_order":
+            from handlers.history_order import show_history_order
+            await show_history_order(update, context)
+        elif cb == "menu_history_deposit":
+            await show_history_deposit(update, context)
+        elif cb == "menu_support":
+            from handlers.support import show_support
+            await show_support(update, context)
+        elif cb == "menu_rules":
+            from handlers.rules import show_rules
+            await show_rules(update, context)
+        else:
+            await query.answer()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"[FALLBACK_MENU] error: {e}")
+        try:
+            await query.answer("Silakan coba lagi.", show_alert=True)
+        except Exception:
+            pass
+
     return ConversationHandler.END
 
 
