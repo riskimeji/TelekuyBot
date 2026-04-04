@@ -38,6 +38,7 @@ from data.deposit_store import (
 )
 from utils.config       import ADMIN_ID
 from handlers.start     import cancel_and_restart
+from utils.qris         import decode_qris_from_image, make_dynamic_qris, qris_to_image_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,15 @@ PAYMENT_METHODS = {
     "Jago Syariah": "505046381858",
 }
 PAYMENT_AN  = "Ahmad Rizki Akbar Ganiyu"
-QRIS_CHANNEL = "https://t.me/TelekuyPayment/3"
+
+# Load QRIS static string sekali saat startup
+_QRIS_IMAGE_PATH = str(Path(__file__).parent.parent / "data" / "qris.jpg")
+try:
+    _STATIC_QRIS = decode_qris_from_image(_QRIS_IMAGE_PATH)
+    logger.info("QRIS static berhasil di-load.")
+except Exception as _e:
+    _STATIC_QRIS = None
+    logger.warning(f"Gagal load QRIS image: {_e}")
 
 
 def _fmt(n) -> str:
@@ -86,11 +95,11 @@ def _build_payment_info(method: str, amount: int, unique: int) -> str:
         return (
             f"💳 <b>Deposit via QRIS</b>\n"
             f"──────────────────────\n"
-            f"📎 Scan QRIS: {QRIS_CHANNEL}\n\n"
+            f"📷 Scan QR di bawah ini\n\n"
             f"💰 Nominal    : <b>{_fmt(amount)} IDR</b>\n"
             f"🔢 Kode Unik  : <b>+{unique}</b>\n"
             f"💸 <b>Total Bayar : {_fmt(total)} IDR</b>\n\n"
-            f"⚠️ Transfer tepat <b>{_fmt(total)} IDR</b> agar terdeteksi.\n"
+            f"⚠️ Nominal sudah otomatis ter-isi di QRIS.\n"
             f"⏳ Batas waktu: <b>30 menit</b>"
         )
     else:
@@ -147,21 +156,23 @@ async def pick_method(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     context.user_data[_KEY_METHOD] = method
     logger.info(f"[DEPOSIT] user={query.from_user.id} pilih metode={method}")
 
-    sent: Message = await query.message.reply_text(
-        text=(
-            f"💳 <b>Deposit via {method}</b>\n"
-            f"──────────────────────\n"
-            f"Masukkan nominal deposit (IDR).\n"
-            f"Min: <b>{_fmt(MIN_DEPOSIT)}</b>  |  Max: <b>{_fmt(MAX_DEPOSIT)}</b>\n\n"
-            f"Contoh: <code>50000</code>\n"
-            f"Ketik /cancel untuk batal."
-        ),
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("❌ Cancel", callback_data="dep_cancel")]
-        ]),
+    text = (
+        f"💳 <b>Deposit via {method}</b>\n"
+        f"──────────────────────\n"
+        f"Masukkan nominal deposit (IDR).\n"
+        f"Min: <b>{_fmt(MIN_DEPOSIT)}</b>  |  Max: <b>{_fmt(MAX_DEPOSIT)}</b>\n\n"
+        f"Contoh: <code>50000</code>\n"
+        f"Ketik /cancel untuk batal."
     )
-    context.user_data[_KEY_MSG_ID] = sent.message_id
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="dep_cancel")]])
+    try:
+        if query.message.photo or query.message.document:
+            await query.edit_message_caption(caption=text, parse_mode="HTML", reply_markup=kb)
+        else:
+            await query.edit_message_text(text=text, parse_mode="HTML", reply_markup=kb)
+    except BadRequest:
+        pass
+    context.user_data[_KEY_MSG_ID] = query.message.message_id
     return WAITING_AMOUNT
 
 
@@ -208,18 +219,32 @@ async def receive_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         pass
 
     payment_text = _build_payment_info(method, amount, unique)
-
-    sent: Message = await update.message.reply_text(
-        text=(
-            f"{payment_text}\n\n"
-            f"──────────────────────\n"
-            f"📸 Setelah transfer, kirim <b>screenshot bukti pembayaran</b> di sini."
-        ),
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("❌ Cancel", callback_data="dep_cancel")]
-        ]),
+    caption = (
+        f"{payment_text}\n\n"
+        f"──────────────────────\n"
+        f"📸 Setelah transfer, kirim <b>screenshot bukti pembayaran</b> di sini."
     )
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="dep_cancel")]])
+
+    if method == "QRIS" and _STATIC_QRIS:
+        try:
+            import io as _io
+            dynamic_qris = make_dynamic_qris(_STATIC_QRIS, total)
+            qr_bytes     = qris_to_image_bytes(dynamic_qris)
+            sent: Message = await update.message.reply_photo(
+                photo=_io.BytesIO(qr_bytes),
+                caption=caption,
+                parse_mode="HTML",
+                reply_markup=kb,
+            )
+        except Exception as e:
+            logger.error(f"Gagal generate dynamic QRIS: {e}")
+            sent = await update.message.reply_text(
+                text=caption, parse_mode="HTML", reply_markup=kb)
+    else:
+        sent: Message = await update.message.reply_text(
+            text=caption, parse_mode="HTML", reply_markup=kb)
+
     context.user_data[_KEY_MSG_ID] = sent.message_id
     return WAITING_PROOF
 
@@ -715,13 +740,17 @@ async def cancel_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     query = update.callback_query if update.callback_query else None
     if query:
         await query.answer()
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Home", callback_data="menu_home")]])
         try:
-            await query.edit_message_text(
-                text="❌ Deposit dibatalkan.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🏠 Home", callback_data="menu_home")]
-                ]),
-            )
+            if query.message.photo:
+                # Hapus foto QRIS, kirim teks biasa agar tombol Home tampilkan logo
+                await query.delete_message()
+                await query.message.chat.send_message(
+                    text="❌ Deposit dibatalkan.",
+                    reply_markup=kb,
+                )
+            else:
+                await query.edit_message_text(text="❌ Deposit dibatalkan.", reply_markup=kb)
         except BadRequest:
             pass
     else:

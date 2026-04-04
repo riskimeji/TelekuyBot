@@ -192,13 +192,26 @@ async def total_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if u.get("joined_at", "")[:10] == today
     )
 
+    # Akumulasi saldo & total spent seluruh user
+    total_balance = sum(u.get("balance_idr", 0.0) for u in users.values())
+    total_spent   = sum(u.get("total_spent",  0.0) for u in users.values())
+
+    def _fmt(n):
+        try:
+            return f"{int(float(n)):,}"
+        except Exception:
+            return str(n)
+
     await update.message.reply_text(
         f"👥 <b>Statistik User</b>\n"
         f"──────────────────────\n"
         f"📊 Total terdaftar : <b>{total}</b>\n"
         f"✅ Aktif           : <b>{active}</b>\n"
         f"🚫 Banned          : <b>{banned}</b>\n"
-        f"🆕 Baru hari ini   : <b>{new_today}</b>",
+        f"🆕 Baru hari ini   : <b>{new_today}</b>\n"
+        f"──────────────────────\n"
+        f"💰 Total saldo user  : <b>Rp {_fmt(total_balance)}</b>\n"
+        f"💸 Total sudah spend : <b>Rp {_fmt(total_spent)}</b>",
         parse_mode="HTML",
     )
 
