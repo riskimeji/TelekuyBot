@@ -27,7 +27,10 @@ def _post(endpoint: str, payload: dict = None, timeout: int = TIMEOUT_SHORT) -> 
     resp = requests.post(url, json=payload, timeout=timeout)
     if not resp.ok:
         logger.error(f"POST {url} → {resp.status_code} | {resp.text[:300]}")
-    resp.raise_for_status()
+        try:
+            return resp.json()
+        except Exception:
+            resp.raise_for_status()
     return resp.json()
 
 
