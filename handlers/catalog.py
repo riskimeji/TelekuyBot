@@ -3,11 +3,13 @@ handlers/catalog.py
 
 Flow:
   [Purchase]
-    → show_categories()        — list kategori (name + total stock)
+    → show_categories()          — list continent
+      → klik continent
+    → show_continent_cats()      — list kategori dalam continent
       → klik kategori
-    → show_price_tiers()       — list harga tier dalam kategori itu
+    → show_price_tiers()         — list harga tier dalam kategori itu
       → klik harga
-    → show_item_detail()       — halaman konfirmasi sebelum buy
+    → show_item_detail()         — halaman konfirmasi sebelum buy
       → [Buy] [Instruction] [Back] [Home]
 """
 
@@ -69,12 +71,69 @@ def _find_category(context, cat_id: int) -> dict | None:
     return None
 
 
+def _get_continents(categories: list[dict]) -> list[str]:
+    """Ambil daftar continent unik, sorted A-Z."""
+    seen = set()
+    result = []
+    for c in categories:
+        cont = (c.get("continent") or "").strip()
+        if cont and cont not in seen:
+            seen.add(cont)
+            result.append(cont)
+    return sorted(result)
+
+
+def _cats_for_continent(categories: list[dict], cont_name: str) -> list[dict]:
+    cats = [c for c in categories if (c.get("continent") or "").strip() == cont_name]
+    return sorted(cats, key=lambda c: c.get("total_stock", 0), reverse=True)
+
+
 # ── keyboard builders ────────────────────────────────────────────────────────
 
+def _kb_continents(continents: list[str]) -> InlineKeyboardMarkup:
+    rows = []
+    for idx, cont in enumerate(continents):
+        rows.append([InlineKeyboardButton(f"🌍 {cont}", callback_data=f"continent_{idx}")])
+    rows.append([InlineKeyboardButton("🏠 Home", callback_data="menu_home")])
+    return InlineKeyboardMarkup(rows)
+
+
+CONT_PAGE_SIZE = 10
+
+def _kb_continent_cats(cats: list[dict], cont_idx: int, page: int = 0) -> InlineKeyboardMarkup:
+    """Keyboard list kategori dalam satu continent, dengan pagination."""
+    total_pages = max(1, (len(cats) + CONT_PAGE_SIZE - 1) // CONT_PAGE_SIZE)
+    page        = max(0, min(page, total_pages - 1))
+    start       = page * CONT_PAGE_SIZE
+    chunk       = cats[start : start + CONT_PAGE_SIZE]
+
+    rows = []
+    for cat in chunk:
+        stock = cat.get("total_stock", 0)
+        name  = cat.get("name", "?")
+        label = f"{name}  ({stock})" if stock > 0 else f"{name}  (Habis)"
+        cb    = f"cat_{cat['id']}" if stock > 0 else "cat_out_of_stock"
+        rows.append([InlineKeyboardButton(label, callback_data=cb)])
+
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("◀️ Prev", callback_data=f"contp_{cont_idx}_{page - 1}"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton("Next ▶️", callback_data=f"contp_{cont_idx}_{page + 1}"))
+    if nav:
+        rows.append(nav)
+
+    rows.append([
+        InlineKeyboardButton("◀️ Back", callback_data="menu_stock"),
+        InlineKeyboardButton("🏠 Home", callback_data="menu_home"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+# kept for backward compat (not used in new flow)
 CAT_PAGE_SIZE = 10
 
 def _kb_categories(categories: list[dict], page: int = 0) -> InlineKeyboardMarkup:
-    """Tampilkan kategori dengan pagination 10 per halaman."""
     total_pages = max(1, (len(categories) + CAT_PAGE_SIZE - 1) // CAT_PAGE_SIZE)
     page        = max(0, min(page, total_pages - 1))
     start       = page * CAT_PAGE_SIZE
@@ -88,12 +147,11 @@ def _kb_categories(categories: list[dict], page: int = 0) -> InlineKeyboardMarku
         cb    = f"cat_{cat['id']}" if stock > 0 else "cat_out_of_stock"
         rows.append([InlineKeyboardButton(label, callback_data=cb)])
 
-    # Navigasi
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton("◀️ Prev", callback_data=f"cat_page_{page-1}"))
+        nav.append(InlineKeyboardButton("◀️ Prev", callback_data=f"cat_page_{page - 1}"))
     if page < total_pages - 1:
-        nav.append(InlineKeyboardButton("Next ▶️", callback_data=f"cat_page_{page+1}"))
+        nav.append(InlineKeyboardButton("Next ▶️", callback_data=f"cat_page_{page + 1}"))
     if nav:
         rows.append(nav)
 
@@ -101,7 +159,7 @@ def _kb_categories(categories: list[dict], page: int = 0) -> InlineKeyboardMarku
     return InlineKeyboardMarkup(rows)
 
 
-def _kb_price_tiers(cat_id: int, tiers: list[dict]) -> InlineKeyboardMarkup:
+def _kb_price_tiers(cat_id: int, tiers: list[dict], back_cb: str = "menu_stock") -> InlineKeyboardMarkup:
     rows = []
     for i, tier in enumerate(tiers):
         price = _fmt_price(tier.get("sell_price", "0"))
@@ -109,14 +167,13 @@ def _kb_price_tiers(cat_id: int, tiers: list[dict]) -> InlineKeyboardMarkup:
         label = f"💰 {price} IDR  —  stok {stock}"
         rows.append([InlineKeyboardButton(label, callback_data=f"tier_{cat_id}_{i}")])
     rows.append([
-        InlineKeyboardButton("◀️ Back", callback_data="menu_stock"),
+        InlineKeyboardButton("◀️ Back", callback_data=back_cb),
         InlineKeyboardButton("🏠 Home", callback_data="menu_home"),
     ])
     return InlineKeyboardMarkup(rows)
 
 
 def _kb_item_detail(cat_id: int, tier_idx: int, back_cb: str = None) -> InlineKeyboardMarkup:
-    # back_cb: kalau 1 tier → "menu_stock", kalau multi tier → "cat_{cat_id}"
     if back_cb is None:
         back_cb = f"cat_{cat_id}"
     return InlineKeyboardMarkup([
@@ -132,7 +189,7 @@ def _kb_item_detail(cat_id: int, tier_idx: int, back_cb: str = None) -> InlineKe
 # ── handlers ─────────────────────────────────────────────────────────────────
 
 async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Klik [Purchase] atau [Back] dari tier page."""
+    """Klik [Purchase] → tampilkan daftar continent."""
     query: CallbackQuery = update.callback_query
     await query.answer()
 
@@ -142,9 +199,8 @@ async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         pass
 
     try:
-        from services.laravel_api import get_categories
         categories = get_categories()
-        context.bot_data["categories"] = categories   # cache
+        context.bot_data["categories"] = categories
     except Exception as e:
         await _edit(query,
             f"❌ Gagal memuat kategori.\n<code>{e}</code>",
@@ -161,19 +217,101 @@ async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         return
 
-    total = sum(c.get("total_stock", 0) for c in categories)
+    continents = _get_continents(categories)
+    context.bot_data["continents"] = continents
+
     caption = (
         f"🛒 <b>Purchase</b>\n"
         f"──────────────────────\n"
-        f"Pilih kategori akun yang ingin dibeli.\n"
-        f"Total tersedia: <b>{total:,}</b> akun"
+        f"Pilih wilayah akun yang ingin dibeli:"
     )
-    await _edit(query, caption, _kb_categories(categories, page=0))
+    await _edit(query, caption, _kb_continents(continents))
+
+
+async def show_continent_cats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Klik salah satu continent → tampil daftar kategori dalam continent itu.
+    callback_data: continent_{idx}
+    """
+    query: CallbackQuery = update.callback_query
+    await query.answer()
+
+    cont_idx   = int(query.data.split("_")[1])
+    continents = context.bot_data.get("continents", [])
+    categories = _get_categories_cached(context)
+
+    # Kalau cache kosong (bot restart) — ambil ulang
+    if not categories or not continents:
+        try:
+            categories = get_categories()
+            context.bot_data["categories"] = categories
+            continents = _get_continents(categories)
+            context.bot_data["continents"] = continents
+        except Exception as e:
+            await query.answer(f"❌ Gagal memuat: {e}", show_alert=True)
+            return
+
+    if cont_idx >= len(continents):
+        await query.answer("❌ Wilayah tidak ditemukan.", show_alert=True)
+        return
+
+    cont_name = continents[cont_idx]
+    cats      = _cats_for_continent(categories, cont_name)
+
+    # Simpan untuk back button di halaman tier/detail
+    context.user_data["current_continent_idx"] = cont_idx
+
+    total_stock = sum(c.get("total_stock", 0) for c in cats)
+    caption = (
+        f"🌍 <b>{cont_name}</b>\n"
+        f"──────────────────────\n"
+        f"Pilih kategori akun yang ingin dibeli.\n"
+        f"Total tersedia: <b>{total_stock:,}</b> akun"
+    )
+    await _edit(query, caption, _kb_continent_cats(cats, cont_idx, page=0))
+
+
+async def paginate_continent_cats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Prev/Next dalam halaman kategori continent.
+    callback_data: contp_{cont_idx}_{page}
+    """
+    query: CallbackQuery = update.callback_query
+    await query.answer()
+
+    parts    = query.data.split("_")
+    cont_idx = int(parts[1])
+    page     = int(parts[2])
+
+    continents = context.bot_data.get("continents", [])
+    categories = _get_categories_cached(context)
+
+    if not categories or not continents:
+        try:
+            categories = get_categories()
+            context.bot_data["categories"] = categories
+            continents = _get_continents(categories)
+            context.bot_data["continents"] = continents
+        except Exception as e:
+            await query.answer(f"❌ Gagal memuat: {e}", show_alert=True)
+            return
+
+    cont_name = continents[cont_idx]
+    cats      = _cats_for_continent(categories, cont_name)
+
+    total_pages = max(1, (len(cats) + CONT_PAGE_SIZE - 1) // CONT_PAGE_SIZE)
+    caption = (
+        f"🌍 <b>{cont_name}</b>\n"
+        f"──────────────────────\n"
+        f"Pilih kategori akun yang ingin dibeli.\n"
+        f"<i>(hal. {page + 1}/{total_pages})</i>"
+    )
+    await _edit(query, caption, _kb_continent_cats(cats, cont_idx, page=page))
 
 
 async def paginate_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Klik tombol Prev/Next di halaman kategori.
+    Klik tombol Prev/Next di halaman kategori global (fallback).
     callback_data: cat_page_{n}
     """
     query: CallbackQuery = update.callback_query
@@ -183,9 +321,7 @@ async def paginate_categories(update: Update, context: ContextTypes.DEFAULT_TYPE
     categories = _get_categories_cached(context)
 
     if not categories:
-        # Cache kosong — ambil ulang
         try:
-            from services.laravel_api import get_categories
             categories = get_categories()
             context.bot_data["categories"] = categories
         except Exception as e:
@@ -217,9 +353,7 @@ async def show_price_tiers(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     cat    = _find_category(context, cat_id)
 
     if not cat:
-        # Cache kosong (bot restart) — ambil ulang
         try:
-            from services.laravel_api import get_categories
             cats = get_categories()
             context.bot_data["categories"] = cats
             cat = next((c for c in cats if c["id"] == cat_id), None)
@@ -235,11 +369,16 @@ async def show_price_tiers(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.answer("⚠️ Tidak ada harga tersedia.", show_alert=True)
         return
 
-    # Kalau hanya 1 tier, langsung ke detail — Back harus ke list kategori, bukan tier page
+    # Tentukan back_cb: kembali ke continent view kalau tersedia
+    cont_idx = context.user_data.get("current_continent_idx", -1)
+    back_to_continent = f"continent_{cont_idx}" if cont_idx >= 0 else "menu_stock"
+
+    # Kalau hanya 1 tier, langsung ke detail
     if len(tiers) == 1:
         context.user_data["selected_cat_id"]   = cat_id
         context.user_data["selected_tier_idx"] = 0
-        await _render_item_detail(query, cat, 0, single_tier=True)
+        await _render_item_detail(query, cat, 0, single_tier=True,
+                                  single_tier_back=back_to_continent)
         return
 
     name  = cat.get("name", "?")
@@ -250,7 +389,7 @@ async def show_price_tiers(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         f"──────────────────────\n"
         f"Pilih harga:"
     )
-    await _edit(query, caption, _kb_price_tiers(cat_id, tiers))
+    await _edit(query, caption, _kb_price_tiers(cat_id, tiers, back_cb=back_to_continent))
 
 
 async def show_item_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -277,7 +416,8 @@ async def show_item_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def _render_item_detail(query: CallbackQuery, cat: dict, tier_idx: int,
-                              single_tier: bool = False) -> None:
+                              single_tier: bool = False,
+                              single_tier_back: str = None) -> None:
     """Render halaman detail item — dipakai oleh show_item_detail & show_price_tiers."""
     tiers    = cat.get("telegram_prices", [])
     tier     = tiers[tier_idx]
@@ -286,8 +426,11 @@ async def _render_item_detail(query: CallbackQuery, cat: dict, tier_idx: int,
     stock    = tier.get("stock", 0)
     cat_id   = cat["id"]
 
-    # Kalau 1 tier: Back → list kategori. Kalau multi tier: Back → halaman harga
-    back_cb = "menu_stock" if single_tier else f"cat_{cat_id}"
+    if single_tier:
+        # Kembali ke continent view kalau ada, otherwise ke list semua continent
+        back_cb = single_tier_back or "menu_stock"
+    else:
+        back_cb = f"cat_{cat_id}"
 
     caption = (
         f"✅ <b>You are buying:</b>\n"
@@ -347,7 +490,6 @@ async def show_instruction(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     ])
 
     if is_post:
-        # Kirim pesan baru — pesan sukses order tetap utuh di atas
         await query.message.reply_text(
             text=text,
             parse_mode="HTML",
@@ -355,7 +497,6 @@ async def show_instruction(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             disable_web_page_preview=True,
         )
     else:
-        # Edit pesan yang ada (dari halaman detail sebelum beli)
         await _edit(query, text, back_kb)
 
 
